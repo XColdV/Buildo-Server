@@ -36,6 +36,7 @@ struct World {
     std::vector<DroppedItem> drops;
     uint32_t lastObjectID = 0;  // the client numbers new drops from this, keep in step
     int worldLock = -1;         // tile index of the lock that covers the whole world
+    std::vector<std::pair<int32_t, std::string>> bans;  // userID, name; set by the owner
     bool dirty = false;
 
     Tile* At(int x, int y) {

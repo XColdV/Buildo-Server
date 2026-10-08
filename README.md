@@ -20,6 +20,14 @@ Pretty much everything you need for regular gameplay:
 - Signs and doors (wrench to edit sign text or door destinations)
 - Multiplayer with chat, movement sync, `/wave`, and `/dance`
 - Dynamic `items.dat` built on the fly from game definitions
+- Splicing: plant a seed on a sapling that hasn't grown yet to cross the two
+- A gem shop (`/shop`) with seed packs, locks and clothes
+- Trading between two players in the same world (`/trade <name>`)
+- A world list that pops up over the world menu (the 2012 menu is just a name box)
+- Friends, private messages, and "is online" notices
+- New blocks from sprites the game shipped but never used: Treasure Chest, Toilet, Wood
+  Platform, Grass, Rock Background, Daisy, two paintings and a Black Block
+- Moderation: world owners can kick and ban; mods can mute and server-ban; chat spam gets muted
 
 ## How to run
 
@@ -43,15 +51,33 @@ Have everyone add your server IP to their `hosts` file pointing to both `rtsoft.
 
 ## In-game commands
 
-- `/item <id> [count]` - Spawn items
+- `/shop` - Spend gems
+- `/trade <name>` - Ask to trade (they type `/trade <your name>` to accept); `/trade` reopens it, `/canceltrade` ends it
+- `/worlds` - The world list
+- `/msg <name> <text>`, `/r <text>` - Private messages
+- `/friends`, `/addfriend <name>`, `/unfriend <name>`
 - `/items` or `/find <name>` - Search item IDs
-- `/who` - See who is online
+- `/who` - See who is here
 - `/wave`, `/dance` - Emotes
 - `/respawn` - Return to the entrance door
 - `/gems` - Check your gem count
 - `/help` - Show all commands
 
-Console commands in the server window: `players`, `say <text>`, `save`, `stop`.
+World owners (World Lock owner, or anyone with a lock in a world that has no World Lock):
+`/kick <name>`, `/ban <name>`, `/unban <name>`, `/bans`.
+
+Mods: `/item <id> [count]`, `/mute <name> <minutes>`, `/unmute <name>`, `/sban <name>`.
+
+Console commands in the server window: `players`, `say <text>`, `save`, `stop`, `kick <name>`,
+`ban <name>`, `unban <name>`, `mod <name>`, `unmod <name>`, `mute <name> <minutes>`, `unmute <name>`.
+Mods are kept in `data/mods.txt` and server bans in `data/bans.txt`.
+
+## Splicing and the shop
+
+`extra_items.txt` holds the recipes and the shop. A recipe is a `setup_seed` line naming the two
+seeds that make it (the game's own file already has two: Cave Wall and Lava). The shop uses
+`add_shop|item|count|gems|` and `add_shop_pack|name|gems|picks|id,id,...|`. Item info (the "i"
+button in the inventory) shows grow times and recipes.
 
 ## Locks
 

@@ -1,14 +1,20 @@
 // Test bot: logs in like Buildo does, joins a world, walks back and forth and
 // chats, and prints every function call the server sends it.
-//   bot.exe [name] [world] [seconds] [place item id|0] [punch dx|0] [port]
-// With an item id it places that item two tiles right of where it spawned;
-// with punch dx it punches the ground dx tiles right of spawn a few times.
+//   bot.exe [name] [world] [seconds] [port] [script]
+// Without a script it walks back and forth and chats. A script is steps split
+// by ';', one every half second after it spawns:
+//   /text            chat (or a command)
+//   !a|b\nc|d        raw text message, \n for line breaks (e.g. a dialog_return)
+//   @place id dx dy  place an item dx,dy tiles from where it spawned
+//   @punch dx dy     punch that tile
+//   @wait ms
 #include <enet/enet.h>
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "../src/proto.h"
 
@@ -72,9 +78,19 @@ int main(int argc, char** argv) {
     std::string name = argc > 1 ? argv[1] : "Seth";
     std::string world = argc > 2 ? argv[2] : "START";
     int seconds = argc > 3 ? atoi(argv[3]) : 60;
-    int placeItem = argc > 4 ? atoi(argv[4]) : 0;
-    int punchDx = argc > 5 ? atoi(argv[5]) : 0;
-    int port = argc > 6 ? atoi(argv[6]) : 17095;
+    int port = argc > 4 ? atoi(argv[4]) : 17095;
+    std::vector<std::string> script;
+    if (argc > 5) {
+        std::string all = argv[5], step;
+        for (char c : all + ";") {
+            if (c == ';') {
+                if (!step.empty()) script.push_back(step);
+                step.clear();
+            } else {
+                step += c;
+            }
+        }
+    }
 
     enet_initialize();
     ENetHost* host = enet_host_create(ENET_ADDRESS_TYPE_IPV4, nullptr, 1, 2, 0, 0);
@@ -93,8 +109,8 @@ int main(int argc, char** argv) {
     uint32_t start = enet_time_get(), lastMove = 0, lastChat = 0;
     int dir = 1;
     float spawnX = 0, spawnY = 0;
-    int actions = 0;
-    uint32_t lastAction = 0;
+    size_t nextStep = 0;
+    uint32_t nextStepAt = 0;
     ENetEvent ev;
     while (enet_time_get() - start < static_cast<uint32_t>(seconds) * 1000) {
         while (enet_host_service(host, &ev, 20) > 0) {
@@ -140,25 +156,38 @@ int main(int argc, char** argv) {
             enet_packet_destroy(ev.packet);
         }
         uint32_t now = enet_time_get();
-        if (spawned && (placeItem || punchDx) && actions < 6 && now - lastAction > 400) {
-            lastAction = now;
-            TankPacket t;
-            t.type = 3;
-            t.tileY = static_cast<int>(spawnY / 32);
-            if (placeItem && actions == 0) {
-                t.intData = placeItem;
-                t.tileX = static_cast<int>(spawnX / 32) + 2;
-                printf("placing %d at %d,%d\n", placeItem, t.tileX, t.tileY);
-            } else if (punchDx) {
-                t.intData = 18;
-                t.tileX = static_cast<int>(spawnX / 32) + punchDx;
-                t.tileY += 1;  // the ground under that spot
-                printf("punching %d,%d\n", t.tileX, t.tileY);
+        if (spawned && nextStep < script.size() && now >= nextStepAt) {
+            std::string step = script[nextStep++];
+            nextStepAt = now + 500;
+            printf("> %s\n", step.c_str());
+            if (step[0] == '/') {
+                Text(2, "action|input\n|text|" + step);
+            } else if (step[0] == '!') {
+                std::string raw;
+                for (size_t i = 1; i < step.size(); i++) {
+                    if (step[i] == '\\' && i + 1 < step.size() && step[i + 1] == 'n') {
+                        raw += '\n';
+                        i++;
+                    } else {
+                        raw += step[i];
+                    }
+                }
+                Text(2, raw);
+            } else if (step.rfind("@wait", 0) == 0) {
+                nextStepAt = now + atoi(step.c_str() + 5);
+            } else if (step.rfind("@place", 0) == 0 || step.rfind("@punch", 0) == 0) {
+                int id = 18, dx = 0, dy = 0;
+                if (step[1] == 'p' && step[2] == 'l') sscanf(step.c_str() + 6, "%d %d %d", &id, &dx, &dy);
+                else sscanf(step.c_str() + 6, "%d %d", &dx, &dy);
+                TankPacket t;
+                t.type = 3;
+                t.intData = id;
+                t.tileX = static_cast<int>(spawnX / 32) + dx;
+                t.tileY = static_cast<int>(spawnY / 32) + dy;
+                Send(4, &t, sizeof t);
             }
-            if (t.intData) Send(4, &t, sizeof t);
-            actions++;
         }
-        if (spawned && !placeItem && !punchDx && now - lastMove > 200) {
+        if (spawned && script.empty() && now - lastMove > 200) {
             lastMove = now;
             x += dir * 16.f;
             if (x > startX + 96 || x < startX - 96) dir = -dir;
@@ -171,7 +200,7 @@ int main(int argc, char** argv) {
             t.tileX = t.tileY = -1;
             Send(4, &t, sizeof t);
         }
-        if (spawned && now - lastChat > 8000) {
+        if (spawned && script.empty() && now - lastChat > 8000) {
             lastChat = now;
             Text(2, "action|input\n|text|hello from the bot, netID " + std::to_string(netID));
         }

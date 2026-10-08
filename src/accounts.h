@@ -13,6 +13,9 @@ struct Account {
     uint16_t clothes[kClothingSlots] = {};
     uint32_t skin = 0;
     int gems = 0;
+    std::vector<std::string> friends;       // names as shown
+    std::vector<std::string> recentWorlds;  // newest first
+    int64_t mutedUntil = 0;                 // unix seconds
 };
 
 bool LoadAccount(const std::string& dataDir, const std::string& name, Account& out);

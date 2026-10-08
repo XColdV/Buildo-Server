@@ -13,6 +13,7 @@ enum ItemID : uint16_t {
     ITEM_CAVE_WALL = 14,
     ITEM_FIST = 18,
     ITEM_WRENCH = 32,
+    ITEM_TREASURE_CHEST = 102,  // from extra_items.txt; breaking one drops gems
     ITEM_GEMS = 112,  // the client adds pickups of this id to its bux counter
 };
 
@@ -41,6 +42,8 @@ struct ItemDef {
     uint16_t rarity = 0;
     uint8_t maxCanHold = 200;  // 0 = never used up
     int lockSize = -1;         // locks: tiles claimed, 0 = whole world, -1 = not set
+    bool noSeed = false;       // set_no_seed: never gets a seed record
+    std::string sound;         // set_sound: played by sound blocks (material 5) and boomboxes (6)
     bool defined = false;
     // Seeds
     bool isSeed = false;
@@ -53,6 +56,19 @@ struct ItemDef {
 
 // The game's item_definitions.txt, then the server's own additions (optional).
 bool LoadItems(const std::string& definitionsPath, const std::string& extraPath);
+
+// add_shop / add_shop_pack lines from extra_items.txt, in file order.
+struct ShopEntry {
+    std::string name;               // packs only; items use the item's name
+    uint16_t item = 0;              // 0 for a pack
+    int count = 1;                  // items handed over
+    int price = 0;                  // gems
+    std::vector<uint16_t> choices;  // packs: count random picks from these
+};
+const std::vector<ShopEntry>& ShopEntries();
+
+// The seed two seeds splice into, or 0. Order doesn't matter.
+uint16_t SpliceResult(uint16_t seedA, uint16_t seedB);
 const ItemDef* GetItem(uint32_t id);
 const std::vector<ItemDef>& AllItems();
 const std::vector<uint8_t>& ItemsDat();

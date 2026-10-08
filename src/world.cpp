@@ -116,9 +116,9 @@ void FindWorldLock(World& w) {
 // u32 lastObjectID, tiles (u16 fg, u16 bg, s32 owner, s64 plantedAt, u8 fruit,
 // str label; version 2 adds str ownerName, u16 lockParent, u8 ignoreEmpty,
 // u8 access count and that many s32 userID + str name), u32 drop count and
-// the drops.
+// the drops; version 3 adds u32 ban count and that many s32 userID + str name.
 namespace {
-constexpr uint32_t kVersion = 2;
+constexpr uint32_t kVersion = 3;
 
 std::string PathFor(const std::string& dir, const std::string& name) { return dir + "/" + name + ".bwld"; }
 }  // namespace
@@ -157,6 +157,11 @@ bool SaveWorld(const std::string& dir, const World& w) {
         out.u8(d.count);
         out.u8(d.flags);
         out.u32(d.id);
+    }
+    out.u32(static_cast<uint32_t>(w.bans.size()));
+    for (auto& b : w.bans) {
+        out.i32(b.first);
+        out.str16(b.second);
     }
 
     std::string tmp = PathFor(dir, w.name) + ".tmp";
@@ -223,6 +228,13 @@ bool LoadWorld(const std::string& dir, World& w) {
         d.flags = in.get<uint8_t>();
         d.id = in.get<uint32_t>();
         loaded.drops.push_back(d);
+    }
+    if (version >= 3) {
+        uint32_t bans = in.get<uint32_t>();
+        for (uint32_t i = 0; i < bans && in.ok(); i++) {
+            int32_t id = in.get<int32_t>();
+            loaded.bans.push_back({id, in.str16()});
+        }
     }
     if (!in.ok()) return false;
     FindWorldLock(loaded);

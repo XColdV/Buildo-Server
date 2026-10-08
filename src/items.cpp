@@ -5,6 +5,7 @@
 #include "log.h"
 #include "proto.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -13,6 +14,8 @@
 namespace {
 
 std::vector<ItemDef> g_items;
+std::vector<ShopEntry> g_shop;
+std::map<uint32_t, uint16_t> g_splices;  // (low seed << 16 | high seed) -> result seed
 std::vector<uint8_t> g_dat;
 uint32_t g_hash = 0;
 
@@ -20,6 +23,7 @@ uint32_t g_hash = 0;
 const std::map<std::string, uint8_t> kMaterials = {
     {"TILE_MATERIAL_FIST", 0},       {"TILE_MATERIAL_WRENCH", 1},    {"TILE_MATERIAL_USER_DOOR", 2},
     {"TILE_MATERIAL_LOCK", 3},       {"TILE_MATERIAL_SIGN", 4},      {"TILE_MATERIAL_BOOMBOX", 6},
+    {"TILE_MATERIAL_SOUND_BLOCK", 5},
     {"TILE_MATERIAL_DOOR", 7},       {"TILE_MATERIAL_ROCK", 8},      {"TILE_MATERIAL_WOOD", 8},
     {"TILE_MATERIAL_BEDROCK", 9},    {"TILE_MATERIAL_LAVA", 10},     {"TILE_MATERIAL_DIRT", 11},
     {"TILE_MATERIAL_BACKGROUND", 12}, {"TILE_MATERIAL_SEED", 13},    {"TILE_MATERIAL_CLOTHES", 14},
@@ -31,6 +35,7 @@ constexpr uint8_t MAT_FIST = 0, MAT_WRENCH = 1, MAT_USER_DOOR = 2, MAT_LOCK = 3,
 const std::map<std::string, uint8_t> kStorage = {
     {"TILE_STORAGE_SINGLE_FRAME_IN_TILESHEET", 1},
     {"TILE_STORAGE_SMART_EDGE", 2},
+    {"TILE_STORAGE_SMART_EDGE_HORIZONTAL", 3},  // 4x1 sheet, picks by left/right neighbours
 };
 
 const std::map<std::string, uint8_t> kBodyParts = {
@@ -78,7 +83,7 @@ uint32_t ClientHash(const uint8_t* p, size_t len) {
 // A tree has to exist for every block a player can break, because the client
 // reads a seed's fruit as (seed id - 1).
 bool WantsSeed(const ItemDef& it) {
-    if (!it.defined || it.isSeed) return false;
+    if (!it.defined || it.isSeed || it.noSeed || it.name == "Unused") return false;
     switch (it.material) {
     case MAT_FIST: case MAT_WRENCH: case MAT_DOOR: case MAT_BEDROCK: case MAT_CLOTHES: case MAT_GEMS:
         return false;
@@ -112,7 +117,7 @@ void Serialize() {
         w.u8(it.bodyPart);
         w.u16(it.rarity);
         w.u8(it.maxCanHold);
-        w.str16("");  // extra (audio) file
+        w.str16(it.sound);  // extra (audio) file, path as-is
         w.u32(0);     // extra file hash
         w.u32(400);   // animation interval ms
         w.u8(it.seedBase);
@@ -210,6 +215,27 @@ void ParseDefinitions(const std::string& text, const std::string& fileName) {
             if (last >= 0) g_items[last].tint = Rgba(num(1), num(2), num(3), num(4));
         } else if (cmd == "set_max_can_hold" && f.size() >= 3) {
             Slot(num(1)).maxCanHold = static_cast<uint8_t>(num(2));
+        } else if (cmd == "set_no_seed" && f.size() >= 2) {
+            Slot(num(1)).noSeed = true;
+        } else if (cmd == "set_sound" && f.size() >= 3) {
+            Slot(num(1)).sound = field(2);
+        } else if (cmd == "add_shop" && f.size() >= 4) {
+            // add_shop|item id|count|price|
+            ShopEntry e;
+            e.item = static_cast<uint16_t>(num(1));
+            e.count = std::max(1, num(2));
+            e.price = num(3);
+            g_shop.push_back(e);
+        } else if (cmd == "add_shop_pack" && f.size() >= 5) {
+            // add_shop_pack|name|price|picks|id,id,id|
+            ShopEntry e;
+            e.name = field(1);
+            e.price = num(2);
+            e.count = std::max(1, num(3));
+            std::istringstream ids(field(4));
+            std::string id;
+            while (std::getline(ids, id, ',')) e.choices.push_back(static_cast<uint16_t>(atoi(id.c_str())));
+            if (!e.choices.empty()) g_shop.push_back(e);
         } else if (cmd == "set_lock_size" && f.size() >= 3) {
             // Server-side only: tiles an area lock claims, 0 = the whole world.
             Slot(num(1)).lockSize = num(2);
@@ -228,6 +254,8 @@ bool LoadItems(const std::string& definitionsPath, const std::string& extraPath)
         return false;
     }
     g_items.clear();
+    g_shop.clear();
+    g_splices.clear();
     ParseDefinitions(text, "item_definitions.txt");
     std::string extra;
     if (!extraPath.empty() && ReadFile(extraPath, extra)) ParseDefinitions(extra, "extra_items.txt");
@@ -282,6 +310,21 @@ bool LoadItems(const std::string& definitionsPath, const std::string& extraPath)
         }
     }
 
+    for (const ItemDef& it : g_items) {
+        if (!it.isSeed || !it.seed1 || !it.seed2) continue;
+        uint16_t a = std::min(it.seed1, it.seed2), b = std::max(it.seed1, it.seed2);
+        uint32_t key = (static_cast<uint32_t>(a) << 16) | b;
+        if (g_splices.count(key)) LogError("two seeds splice from %u + %u; keeping %u", a, b, g_splices[key]);
+        else g_splices[key] = it.id;
+    }
+    // Drop shop lines that point at items that don't exist.
+    g_shop.erase(std::remove_if(g_shop.begin(), g_shop.end(), [](const ShopEntry& e) {
+        if (e.item) return GetItem(e.item) == nullptr;
+        for (uint16_t c : e.choices)
+            if (!GetItem(c)) return true;
+        return false;
+    }), g_shop.end());
+
     Serialize();
     int seeds = 0, real = 0;
     for (auto& it : g_items) {
@@ -299,6 +342,13 @@ const ItemDef* GetItem(uint32_t id) {
 }
 const std::vector<ItemDef>& AllItems() { return g_items; }
 const std::vector<uint8_t>& ItemsDat() { return g_dat; }
+const std::vector<ShopEntry>& ShopEntries() { return g_shop; }
+
+uint16_t SpliceResult(uint16_t seedA, uint16_t seedB) {
+    uint16_t a = std::min(seedA, seedB), b = std::max(seedA, seedB);
+    auto it = g_splices.find((static_cast<uint32_t>(a) << 16) | b);
+    return it == g_splices.end() ? 0 : it->second;
+}
 uint32_t ItemsDatHash() { return g_hash; }
 
 ExtraType ExtraTypeFor(uint8_t material) {

@@ -13,30 +13,9 @@
 #include "accounts.h"
 #include "items.h"
 #include "log.h"
+#include "server.h"
 
 Options g_opt;
-
-namespace {
-
-// Tank packet types (client switch 0x434418 / sender functions).
-enum TankType : uint8_t {
-    TANK_STATE = 0,
-    TANK_CALL_FUNCTION = 1,
-    TANK_TILE_CHANGE = 3,
-    TANK_MAP_DATA = 4,
-    TANK_TILE_UPDATE = 5,
-    TANK_TILE_DAMAGE = 8,
-    TANK_INVENTORY = 9,
-    TANK_TREE_STATE = 12,
-    TANK_REMOVE_ITEM = 13,
-    TANK_ITEM_OBJECT = 14,
-    TANK_LOCK = 15,
-    TANK_ITEMS_DAT = 16,
-    // client -> server only
-    TANK_TILE_ACTIVATE = 7,
-    TANK_ITEM_ACTIVATE = 10,
-    TANK_OBJECT_PICKUP = 11,
-};
 
 std::map<ENetPeer*, std::unique_ptr<Player>> g_players;
 std::map<std::string, std::unique_ptr<World>> g_worlds;
@@ -62,7 +41,7 @@ void Send(ENetPeer* peer, uint32_t msgType, const void* data, size_t len) {
     enet_peer_send(peer, 0, p);
 }
 
-void SendTank(ENetPeer* peer, TankPacket t, const std::vector<uint8_t>& ext = {}) {
+void SendTank(ENetPeer* peer, TankPacket t, const std::vector<uint8_t>& ext) {
     std::vector<uint8_t> buf(sizeof(TankPacket) + ext.size());
     if (!ext.empty()) {
         t.flags |= TANK_FLAG_EXTENDED;
@@ -76,7 +55,7 @@ void SendTank(ENetPeer* peer, TankPacket t, const std::vector<uint8_t>& ext = {}
 // Message type 3 is the only text the client accepts from a server (0x4324c0).
 void SendAction(ENetPeer* peer, const std::string& text) { Send(peer, MSG_GAME_MESSAGE, text.data(), text.size()); }
 
-void Call(ENetPeer* peer, const VariantList& v, int netID = -1, int delayMs = -1) {
+void Call(ENetPeer* peer, const VariantList& v, int netID, int delayMs) {
     TankPacket t;
     t.type = TANK_CALL_FUNCTION;
     t.netID = netID;
@@ -88,13 +67,23 @@ void Call(ENetPeer* peer, const VariantList& v, int netID = -1, int delayMs = -1
 
 void Console(Player& p, const std::string& msg) { Call(p.peer, VariantList("OnConsoleMessage").str(msg)); }
 
-template <class F> void ForWorld(World* w, F f) {
-    if (!w) return;
-    for (auto& [peer, pl] : g_players)
-        if (pl->world == w) f(*pl);
+void Dialog(Player& p, const std::string& text) { Call(p.peer, VariantList("OnDialogRequest").str(text)); }
+
+void SendGems(Player& p) { Call(p.peer, VariantList("OnSetBux").i(p.gems)); }
+
+std::string Lower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(tolower(c)); });
+    return s;
 }
 
-void SendWorldTank(World* w, const TankPacket& t, const std::vector<uint8_t>& ext = {}) {
+Player* OnlineByName(const std::string& name) {
+    std::string want = Lower(name);
+    for (auto& [peer, o] : g_players)
+        if (o->loggedIn && Lower(o->name) == want) return o.get();
+    return nullptr;
+}
+
+void SendWorldTank(World* w, const TankPacket& t, const std::vector<uint8_t>& ext) {
     ForWorld(w, [&](Player& p) { SendTank(p.peer, t, ext); });
 }
 
@@ -307,6 +296,7 @@ void SpawnPoint(World& w, float& x, float& y) {
 void LeaveWorld(Player& p, bool toMenu) {
     World* w = p.world;
     if (!w) return;
+    CancelTrade(p, "left the world");
     p.world = nullptr;
     std::string remove = "netID|" + std::to_string(p.netID) + "\n";
     ForWorld(w, [&](Player& o) {
@@ -314,7 +304,10 @@ void LeaveWorld(Player& p, bool toMenu) {
         Console(o, "`5<`w" + p.name + "`` left, `w" + std::to_string(PlayersIn(w)) + "`` others here>``");
     });
     SaveWorldIfDirty(*w);
-    if (toMenu) Call(p.peer, VariantList("OnRequestWorldSelectMenu").str(""));
+    if (toMenu) {
+        Call(p.peer, VariantList("OnRequestWorldSelectMenu").str(""));
+        ShowWorldList(p);
+    }
 }
 
 void JoinWorld(Player& p, const std::string& rawName) {
@@ -324,8 +317,14 @@ void JoinWorld(Player& p, const std::string& rawName) {
         Call(p.peer, VariantList("OnFailedToEnterWorld"));
         return;
     }
-    if (p.world) LeaveWorld(p, false);
     World* w = GetWorld(name);
+    if (IsWorldBanned(p, *w)) {
+        Console(p, "`4You're banned from `w" + name + "``.``");
+        Call(p.peer, VariantList("OnFailedToEnterWorld"));
+        return;
+    }
+    if (p.world) LeaveWorld(p, false);
+    RememberWorld(p, name);
     TankPacket map;
     map.type = TANK_MAP_DATA;
     SendTank(p.peer, map, SerializeWorld(*w));
@@ -413,6 +412,14 @@ void SendTileUpdate(World& w, int x, int y) {
 
 void BreakDrops(World& w, uint16_t broken, int x, int y) {
     float cx = x * 32.f + 8.f, cy = y * 32.f + 8.f;
+    if (broken == ITEM_TREASURE_CHEST) {
+        for (int i = 0; i < 4; i++) DropItem(w, ITEM_GEMS, Rand(5, 30), cx + Rand(-8, 8), cy + Rand(-8, 8));
+        return;
+    }
+    if (GetItem(ITEM_TREASURE_CHEST) && Rand(1, 250) == 1) {
+        DropItem(w, ITEM_TREASURE_CHEST, 1, cx, cy);
+        return;
+    }
     const ItemDef* seed = GetItem(broken + 1u);
     if (seed && IsSeedItem(*seed) && Rand(1, 100) <= 30)
         DropItem(w, broken + 1, 1, cx + Rand(-6, 6), cy + Rand(-6, 6));
@@ -501,6 +508,33 @@ void Punch(Player& p, World& w, int x, int y) {
     else if (!IsSeedItem(*def)) BreakDrops(w, target, x, y);
 }
 
+// A seed planted on a tree that hasn't grown yet splices the two (seed1 and
+// seed2 of the result seed in items.dat).
+void Splice(Player& p, World& w, int x, int y, uint16_t seed) {
+    Tile& t = *w.At(x, y);
+    const ItemDef* a = GetItem(t.fg);
+    const ItemDef* b = GetItem(seed);
+    uint16_t result = SpliceResult(t.fg, seed);
+    if (!result) {
+        Console(p, "`4Hmm, `w" + a->name + "`` and `w" + b->name + "`` won't splice.``");
+        return;
+    }
+    const ItemDef* r = GetItem(result);
+    t.fg = result;
+    t.plantedAt = static_cast<int64_t>(time(nullptr));
+    t.fruit = static_cast<uint8_t>(Rand(1, std::max<int>(r->maxFruit, 1)));
+    w.dirty = true;
+    p.Remove(seed, 1);
+    TankPacket rm;
+    rm.type = TANK_REMOVE_ITEM;
+    rm.pad2 = 1;
+    rm.intData = seed;
+    SendTank(p.peer, rm);
+    SendTileUpdate(w, x, y);
+    ForWorld(&w, [&](Player& o) { SendAction(o.peer, "action|play_sfx\nfile|audio/tree_plant.wav\ndelayMS|0\n"); });
+    Console(p, "`5You spliced `w" + a->name + "`` with `w" + b->name + "`` into a `w" + r->name + "``!``");
+}
+
 void Place(Player& p, World& w, int x, int y, uint16_t item) {
     const ItemDef* def = GetItem(item);
     if (!def || IsClothes(*def) || item == ITEM_GEMS || p.Count(item) <= 0) return;
@@ -514,7 +548,11 @@ void Place(Player& p, World& w, int x, int y, uint16_t item) {
         if (t.bg) return;
         t.bg = item;
     } else {
-        if (t.fg) return;
+        if (t.fg) {
+            const ItemDef* cur = GetItem(t.fg);
+            if (IsSeedItem(*def) && cur && IsSeedItem(*cur) && !TreeGrown(t)) Splice(p, w, x, y, item);
+            return;
+        }
         if (IsLock(*def)) {
             if (index == 0) return;  // index 0 means "no lock" in a tile's parent field
             if (t.lockParent) {
@@ -723,11 +761,16 @@ void OnState(Player& p, const uint8_t* raw) {
 
 void Respawn(Player& p) {
     if (!p.world) return;
-    ForWorld(p.world, [&](Player& o) { Call(o.peer, VariantList("OnKilled"), p.netID); });
+    // OnKilled starts the death animation; the client only ends it when the
+    // freeze state goes from 2 back to 0 (0x448a69 -> 0x44a4c0).
     float x, y;
     SpawnPoint(*p.world, x, y);
-    ForWorld(p.world, [&](Player& o) { Call(o.peer, VariantList("OnSetPos").vec2(x, y), p.netID, 2000); });
-    Call(p.peer, VariantList("OnSetFreezeState").u(0), p.netID, 2000);
+    ForWorld(p.world, [&](Player& o) {
+        Call(o.peer, VariantList("OnKilled"), p.netID);
+        Call(o.peer, VariantList("OnSetFreezeState").u(2), p.netID);
+        Call(o.peer, VariantList("OnSetPos").vec2(x, y), p.netID, 2000);
+        Call(o.peer, VariantList("OnSetFreezeState").u(0), p.netID, 2000);
+    });
     p.x = x;
     p.y = y;
 }
@@ -737,10 +780,20 @@ void Command(Player& p, const std::string& line) {
     std::string cmd;
     in >> cmd;
     std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
+    if (SocialCommand(p, cmd, in) || ShopCommand(p, cmd, in) || TradeCommand(p, cmd, in)) return;
     if (cmd == "/help" || cmd == "/?") {
-        Console(p, "`oCommands: `w/item <id> [count]``, `w/items``, `w/find <name>``, `w/who``, `w/wave``, "
-                   "`w/dance``, `w/respawn``, `w/gems``");
+        Console(p, "`oCommands: `w/shop``, `w/trade <name>``, `w/worlds``, `w/msg <name> <text>``, `w/r <text>``, "
+                   "`w/friends``, `w/addfriend <name>``, `w/unfriend <name>``, `w/who``, `w/wave``, `w/dance``, "
+                   "`w/respawn``, `w/gems``, `w/items``, `w/find <name>``, `w/canceltrade``");
+        if (p.world && IsWorldOwner(p, *p.world))
+            Console(p, "`oWorld owner: `w/kick <name>``, `w/ban <name>``, `w/unban <name>``, `w/bans``");
+        if (IsMod(p))
+            Console(p, "`oMod: `w/item <id> [count]``, `w/mute <name> <minutes>``, `w/unmute <name>``, `w/sban <name>``");
     } else if (cmd == "/item") {
+        if (!IsMod(p)) {
+            Console(p, "Only mods can make items. Break blocks for gems and spend them in the /shop.");
+            return;
+        }
         int id = -1, count = 1;
         in >> id >> count;
         const ItemDef* def = GetItem(id);
@@ -794,10 +847,7 @@ void Chat(Player& p, std::string msg) {
         Command(p, msg);
         return;
     }
-    if (!p.world) return;
-    uint32_t now = NowMs();
-    if (now - p.lastChatMs < 500) return;
-    p.lastChatMs = now;
+    if (!p.world || !ChatAllowed(p, msg)) return;
     ForWorld(p.world, [&](Player& o) {
         Call(o.peer, VariantList("OnTalkBubble").u(static_cast<uint32_t>(p.netID)).str(msg).u(0).u(0));
         Console(o, "`o<`w" + p.name + "``> " + msg + "``");
@@ -805,6 +855,7 @@ void Chat(Player& p, std::string msg) {
 }
 
 void DialogReturn(Player& p, std::map<std::string, std::string>& kv) {
+    if (SocialDialog(p, kv) || ShopDialog(p, kv) || TradeDialog(p, kv)) return;
     const std::string& name = kv["dialog_name"];
     World* w = p.world;
     if (name == "drop_item") {
@@ -848,17 +899,52 @@ void DialogReturn(Player& p, std::map<std::string, std::string>& kv) {
     SendTileUpdate(*w, x, y);
 }
 
+std::string SpliceLine(const ItemDef& seed) {
+    const ItemDef* a = GetItem(seed.seed1);
+    const ItemDef* b = GetItem(seed.seed2);
+    if (!a || !b) return "";
+    return "Splice `w" + a->name + "`` with `w" + b->name + "`` to get it.";
+}
+
 void ItemInfo(Player& p, int id) {
     const ItemDef* def = GetItem(id);
     if (!def) return;
-    std::string kind = IsClothes(*def) ? "Something to wear. Double tap it in the inventory to put it on."
-                       : IsSeedItem(*def) ? "Plant it and wait " + std::to_string(def->growSeconds) +
-                                                " seconds, then punch the tree."
-                       : IsBackground(*def) ? "A background block."
-                                            : "Takes " + std::to_string(def->hp) + " hits to break.";
-    Call(p.peer, VariantList("OnDialogRequest").str("set_default_color|`o\nadd_label_with_icon|big|`w" + def->name +
-                                                    "``|left|" + std::to_string(id) + "|\nadd_textbox|" + kind +
-                                                    "|left|\nend_dialog|info|Close||\n"));
+    std::vector<std::string> lines;
+    if (IsClothes(*def)) {
+        lines.push_back("Something to wear. Double tap it in your inventory to put it on.");
+    } else if (IsSeedItem(*def)) {
+        lines.push_back("Plant it, wait " + std::to_string(def->growSeconds) + " seconds, then punch the tree.");
+        std::string made = SpliceLine(*def);
+        lines.push_back(made.empty() ? std::string("You get it from breaking blocks, or from seed packs in the /shop.")
+                                     : made);
+        std::vector<std::string> with;
+        for (const ItemDef& o : AllItems()) {
+            if (!o.isSeed || (o.seed1 != id && o.seed2 != id)) continue;
+            const ItemDef* other = GetItem(o.seed1 == id ? o.seed2 : o.seed1);
+            if (other) with.push_back("+ `w" + other->name + "`` = `w" + o.name + "``");
+        }
+        if (!with.empty()) {
+            lines.push_back("Plant another seed on its sapling to splice:");
+            lines.insert(lines.end(), with.begin(), with.end());
+        }
+    } else {
+        if (IsLock(*def))
+            lines.push_back(def->lockSize > 0 ? "Locks " + std::to_string(def->lockSize) + " tiles around it."
+                                              : "Locks the whole world.");
+        else if (IsBackground(*def))
+            lines.push_back("A background block.");
+        else if (def->hp)
+            lines.push_back("Takes " + std::to_string(def->hp) + " hits to break.");
+        const ItemDef* seed = GetItem(id + 1u);
+        if (seed && IsSeedItem(*seed)) {
+            std::string made = SpliceLine(*seed);
+            lines.push_back("Grows on the `w" + seed->name + "`` tree." + (made.empty() ? "" : " " + made));
+        }
+    }
+    std::string d = "set_default_color|`o\nadd_label_with_icon|big|`w" + def->name + "``|left|" + std::to_string(id) + "|\n";
+    for (auto& l : lines) d += "add_textbox|" + l + "|left|\n";
+    d += "end_dialog|info|Close||\n";
+    Dialog(p, d);
 }
 
 void DropDialog(Player& p, int id) {
@@ -902,8 +988,14 @@ void Login(Player& p, std::map<std::string, std::string>& kv) {
         } while (LoadAccount(g_opt.dataDir, name, other) && !other.passwordHash.empty());
         exists = LoadAccount(g_opt.dataDir, name, acc);
     }
+    if (IsServerBanned(name, p.ip)) {
+        SendAction(p.peer, "action|log\nmsg|`4This server has banned you.``");
+        SendAction(p.peer, "action|logon_fail\n");
+        Log("refused banned %s (%s)", name.c_str(), p.ip.c_str());
+        return;
+    }
     for (auto& [peer, o] : g_players) {
-        if (o.get() != &p && o->loggedIn && o->name == name) {
+        if (o.get() != &p && o->loggedIn && Lower(o->name) == Lower(name)) {
             SendAction(p.peer, "action|log\nmsg|`4" + name + " is already online.``");
             SendAction(p.peer, "action|logon_fail\n");
             return;
@@ -918,6 +1010,9 @@ void Login(Player& p, std::map<std::string, std::string>& kv) {
         memcpy(p.clothes, acc.clothes, sizeof p.clothes);
         p.skin = acc.skin ? acc.skin : kDefaultSkin;
         p.gems = acc.gems;
+        p.friends = acc.friends;
+        p.recentWorlds = acc.recentWorlds;
+        p.mutedUntil = acc.mutedUntil;
     } else {
         p.skin = kDefaultSkin;
         p.userID = NextUserID(g_opt.dataDir);
@@ -937,6 +1032,10 @@ void SavePlayer(Player& p) {
     memcpy(acc.clothes, p.clothes, sizeof acc.clothes);
     acc.skin = p.skin;
     acc.gems = p.gems;
+    acc.name = p.name;
+    acc.friends = p.friends;
+    acc.recentWorlds = p.recentWorlds;
+    acc.mutedUntil = p.mutedUntil;
     if (!SaveAccount(g_opt.dataDir, p.name, acc)) LogError("could not save %s", p.name.c_str());
 }
 
@@ -945,9 +1044,11 @@ void EnterGame(Player& p) {
     SendInventory(p);  // the inventory packet is what closes the client's connecting screen
     Call(p.peer, VariantList("OnSetBux").i(p.gems));
     Call(p.peer, VariantList("OnRequestWorldSelectMenu").str(""));
+    ShowWorldList(p);
     Console(p, "`oWelcome back to `wNovember 2012``, `w" + p.name + "``. Type `w/help`` for commands.``");
     int online = static_cast<int>(g_players.size());
     Console(p, "`w" + std::to_string(online) + "`` " + (online == 1 ? "player is" : "players are") + " online.");
+    OnLoggedIn(p);
 }
 
 // Text from message types 2 and 3. The client appends one junk byte.
@@ -995,8 +1096,6 @@ void OnText(Player& p, std::string text) {
     }
 }
 
-}  // namespace
-
 // ---------------------------------------------------------------- entry points
 
 int Player::Count(uint16_t id) const {
@@ -1012,7 +1111,7 @@ bool Player::Add(uint16_t id, int count) {
         it.count = static_cast<uint8_t>(it.count + count);
         return true;
     }
-    if (inventory.size() >= 64 || count > kMaxStack) return false;
+    if (inventory.size() >= kMaxSlots || count > kMaxStack) return false;
     inventory.push_back({id, static_cast<uint8_t>(count)});
     return true;
 }
@@ -1042,6 +1141,8 @@ void OnConnect(ENetPeer* peer) {
     auto p = std::make_unique<Player>();
     p->peer = peer;
     p->netID = g_nextNetID++;
+    char ip[64] = {};
+    if (enet_address_get_host_ip(&peer->address, ip, sizeof ip) == 0) p->ip = ip;
     g_players[peer] = std::move(p);
     uint32_t zero = 0;
     Send(peer, MSG_SERVER_HELLO, &zero, 4);
@@ -1075,6 +1176,10 @@ void OnDisconnect(ENetPeer* peer) {
     if (it == g_players.end()) return;
     Player& p = *it->second;
     if (p.loggedIn) Log("%s disconnected", p.name.c_str());
+    if (p.loggedIn) {
+        CancelTrade(p, "disconnected");
+        OnLoggedOut(p);
+    }
     LeaveWorld(p, false);
     SavePlayer(p);
     g_players.erase(it);
@@ -1098,6 +1203,7 @@ void SaveEverything() {
 }
 
 void ConsoleCommand(const std::string& line) {
+    if (ServerConsoleCommand(line)) return;
     if (line == "save") {
         SaveEverything();
         Log("saved");
@@ -1109,6 +1215,7 @@ void ConsoleCommand(const std::string& line) {
         for (auto& [peer, p] : g_players)
             if (p->enteredGame) Console(*p, "`4Server:`` " + line.substr(4));
     } else {
-        Log("commands: players, say <text>, save, stop");
+        Log("commands: players, say <text>, save, stop, kick <name>, ban <name>, unban <name>, mod <name>, "
+            "unmod <name>, mute <name> <minutes>, unmute <name>");
     }
 }

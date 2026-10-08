@@ -33,6 +33,13 @@ bool LoadAccount(const std::string& dataDir, const std::string& name, Account& o
         else if (key == "password") std::getline(s, acc.passwordHash);
         else if (key == "skin") s >> acc.skin;
         else if (key == "gems") s >> acc.gems;
+        else if (key == "muted") s >> acc.mutedUntil;
+        else if (key == "friends" || key == "recent") {
+            auto& list = key == "friends" ? acc.friends : acc.recentWorlds;
+            std::string v;
+            while (std::getline(s, v, '|'))
+                if (!v.empty()) list.push_back(v);
+        }
         else if (key == "clothes") {
             for (auto& c : acc.clothes) {
                 std::string v;
@@ -60,6 +67,10 @@ bool SaveAccount(const std::string& dataDir, const std::string& name, const Acco
         out << "name|" << name << "\nuserID|" << acc.userID << "\npassword|" << acc.passwordHash << "\nskin|"
             << acc.skin << "\ngems|" << acc.gems << "\nclothes";
         for (auto c : acc.clothes) out << "|" << c;
+        out << "\nmuted|" << acc.mutedUntil << "\nfriends";
+        for (auto& f : acc.friends) out << "|" << f;
+        out << "\nrecent";
+        for (auto& r : acc.recentWorlds) out << "|" << r;
         out << "\n";
         for (const auto& it : acc.inventory) out << "item|" << it.id << "|" << static_cast<int>(it.count) << "\n";
         if (!out) return false;

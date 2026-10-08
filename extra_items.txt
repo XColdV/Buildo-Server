@@ -1,10 +1,16 @@
 //Server-side additions to the game's item_definitions.txt, read right after it.
-//Same commands, plus one the client never sees:
-//set_lock_size|item id|tiles|   area locks claim that many tiles, 0 locks the whole world
+//Same commands as that file, plus a few the client never sees:
+//set_lock_size|id|tiles|            area locks claim that many tiles, 0 locks the whole world
+//set_no_seed|id|                    no seed record for this item
+//set_sound|id|path|                 sound blocks play it when punched, boomboxes loop it while on
+//add_shop|id|count|gems|            sells count of the item in /shop
+//add_shop_pack|name|gems|picks|ids| sells "picks" random items from the comma-separated list
+//setup_seed|seed id|seed1|a|seed2|b|  splice recipe: planting seed b on an a sapling (or the
+//                                     other way round) makes this seed
 //
-//IDs are the ones these items got in later Growtopia. Everything up to the highest ID ends up
-//in items.dat, so keep IDs low-ish.
+//Every ID up to the highest one ends up in items.dat, so keep IDs low-ish.
 
+//---- Locks. v0.01 had one lock, and it was huge.
 set_lock_size|60|200|
 
 add_tile|202|Small Lock|TILE_MATERIAL_LOCK|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SINGLE_FRAME_IN_TILESHEET|0|0|tiles_lock.rttex|0|0|TILE_COLLISION_SOLID|10|5|
@@ -21,3 +27,80 @@ set_lock_size|206|200|
 add_tile|242|World Lock|TILE_MATERIAL_LOCK|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SINGLE_FRAME_IN_TILESHEET|0|0|tiles_lock.rttex|0|0|TILE_COLLISION_SOLID|10|5|
 set_color|255|225|120|255|
 set_lock_size|242|0|
+
+//---- Blocks drawn from sprites the game ships but never used.
+add_tile|102|Treasure Chest|TILE_MATERIAL_DIRT|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SINGLE_FRAME_IN_TILESHEET|1|2|tileset_1.rttex|0|0|TILE_COLLISION_SOLID|6|5|
+set_no_seed|102|
+
+add_tile|104|Toilet|TILE_MATERIAL_SOUND_BLOCK|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SINGLE_FRAME_IN_TILESHEET|0|0|tiles_toilet.rttex|0|0|TILE_COLLISION_NONE|4|5|
+set_sound|104|audio/toilet_flush.wav|
+
+add_tile|106|Wood Platform|TILE_MATERIAL_WOOD|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SMART_EDGE_HORIZONTAL|0|0|tiles_woodplatform.rttex|0|0|TILE_COLLISION_SOLID|3|4|
+add_tile|108|Grass|TILE_MATERIAL_DIRT|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SMART_EDGE_HORIZONTAL|0|0|tiles_grass.rttex|0|0|TILE_COLLISION_NONE|1|2|
+add_tile|110|Rock Background|TILE_MATERIAL_BACKGROUND|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SMART_EDGE|0|0|tiles_rockbackgd.rttex|0|0|TILE_COLLISION_NONE|3|4|
+add_tile|114|Daisy|TILE_MATERIAL_DIRT|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SINGLE_FRAME_IN_TILESHEET|0|0|tiles_flowers.rttex|0|0|TILE_COLLISION_NONE|1|2|
+add_tile|116|Ghost Painting|TILE_MATERIAL_DIRT|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SINGLE_FRAME_IN_TILESHEET|0|0|tiles_paintings.rttex|0|0|TILE_COLLISION_NONE|2|4|
+add_tile|118|Fire Painting|TILE_MATERIAL_DIRT|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SINGLE_FRAME_IN_TILESHEET|1|0|tiles_paintings.rttex|0|0|TILE_COLLISION_NONE|2|4|
+add_tile|120|Black Block|TILE_MATERIAL_ROCK|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SINGLE_FRAME_IN_TILESHEET|0|2|tileset_1.rttex|0|0|TILE_COLLISION_SOLID|5|5|
+
+//---- Music for the two boomboxes in the original list.
+set_sound|62|audio/mp3/boombox.mp3|
+set_sound|64|audio/mp3/old_timey.mp3|
+
+//---- Splicing. The game's own file has two recipes (Cave Wall and Lava); these add the rest.
+//Dirt and Rock seeds come from breaking blocks.
+setup_seed|101|seed1|3|seed2|15|
+setup_seed|53|seed1|101|seed2|15|
+setup_seed|111|seed1|15|seed2|5|
+setup_seed|107|seed1|101|seed2|11|
+setup_seed|109|seed1|3|seed2|53|
+setup_seed|115|seed1|109|seed2|3|
+setup_seed|55|seed1|53|seed2|11|
+setup_seed|57|seed1|55|seed2|15|
+setup_seed|59|seed1|55|seed2|101|
+setup_seed|21|seed1|101|seed2|53|
+setup_seed|23|seed1|21|seed2|11|
+setup_seed|25|seed1|21|seed2|15|
+setup_seed|27|seed1|21|seed2|3|
+setup_seed|29|seed1|21|seed2|5|
+setup_seed|13|seed1|101|seed2|21|
+setup_seed|31|seed1|13|seed2|11|
+setup_seed|65|seed1|21|seed2|55|
+setup_seed|63|seed1|65|seed2|11|
+setup_seed|105|seed1|57|seed2|107|
+setup_seed|117|seed1|59|seed2|21|
+setup_seed|119|seed1|117|seed2|5|
+setup_seed|121|seed1|11|seed2|5|
+
+//---- /shop
+add_shop_pack|Basic Seed Pack|50|5|3,11,15,101,53|
+add_shop_pack|Fancy Seed Pack|250|3|21,55,59,13,63,65,105,107,109,117|
+add_shop|202|1|50|
+add_shop|204|1|200|
+add_shop|206|1|500|
+add_shop|242|1|1500|
+add_shop|12|1|30|
+add_shop|20|1|15|
+add_shop|44|1|30|
+add_shop|68|1|30|
+add_shop|70|1|60|
+add_shop|46|1|50|
+add_shop|74|1|60|
+add_shop|72|1|80|
+add_shop|66|1|120|
+add_shop|90|1|150|
+add_shop|34|1|100|
+add_shop|38|1|150|
+add_shop|84|1|50|
+add_shop|88|1|80|
+add_shop|76|1|60|
+add_shop|82|1|50|
+add_shop|50|1|60|
+add_shop|86|1|80|
+add_shop|42|1|60|
+add_shop|78|1|100|
+add_shop|80|1|200|
+add_shop|92|1|120|
+add_shop|96|1|150|
+add_shop|98|1|200|
+add_shop|94|1|250|

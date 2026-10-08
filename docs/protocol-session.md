@@ -99,6 +99,8 @@ Same shape as later Growtopia. Minimum token counts (including the command):
 `end_dialog|name|cancelText|okText|` (≥4), `add_spacer|...`, `disable_resize`, `set_default_color|`, `embed_data|k|v`.
 Reply (0x418115, type 2): `action|dialog_return\ndialog_name|<name>\n` + embed_data lines + `buttonClicked|<btn>\n` +
 `<input>|<text>\n` / `<checkbox>|0/1\n`. UNCONFIRMED exact order of the reply lines.
+Buttons: the client strips `_button_` from the entity name and puts `buttonClicked|<name>` in the
+reply (0x418d36..0x418eb7).
 
 ## 2. Client → server, in order
 
@@ -132,7 +134,10 @@ Reply (0x418115, type 2): `action|dialog_return\ndialog_name|<name>\n` + embed_d
 - In-world menu (0x4298e0): **type 3** `action|quit_to_exit` (no newline, 0x429bd8); **type 2**
   `action|respawn\n` (0x429c96); **type 2** `action|growid\n` (0x429d44).
   Server for quit_to_exit: OnRemove to others, then OnRequestWorldSelectMenu to the player.
-  Server for respawn: OnKilled (avatar call), then OnSetPos(spawn) and OnSetFreezeState(0). UNCONFIRMED timing.
+  Server for respawn: OnKilled, then OnSetFreezeState(2), then (after ~2 s) OnSetPos(spawn) and
+  OnSetFreezeState(0), all as avatar calls to everyone in the world. OnKilled sets the death
+  animation (0x44b730, state 6); only OnSetFreezeState going from 2 to 0 clears it (0x448a69 ->
+  0x44a4c0). Without the 2 the player stays dead.
 - Chat (0x415fc5): **type 2** `action|input\n|text|<msg>` — no trailing newline, only sent while connected
   (game+0x7cc +0xb5). The client does not draw its own message; the server echoes OnTalkBubble(netID, msg, 0, 0) and
   OnConsoleMessage to everyone in the world.

@@ -16,6 +16,7 @@ struct InvItem {
 
 constexpr int kClothingSlots = 6;
 constexpr uint8_t kMaxStack = 200;
+constexpr size_t kMaxSlots = 64;  // different items a backpack holds
 
 struct Player {
     ENetPeer* peer = nullptr;
@@ -37,6 +38,13 @@ struct Player {
     int gems = 0;
     uint32_t lastChatMs = 0;
     uint32_t lastLockMsgMs = 0;
+    std::string ip;
+    std::vector<std::string> friends;
+    std::vector<std::string> recentWorlds;
+    int64_t mutedUntil = 0;
+    std::vector<uint32_t> chatTimes;  // recent message times, for the spam limit
+    std::string lastChat;
+    std::string lastWhisperFrom;      // for /r
 
     int Count(uint16_t id) const;
     bool Add(uint16_t id, int count);  // false when it would not fit
