@@ -1,0 +1,7 @@
+build/
+data/
+*.exe
+*.obj
+*.pdb
+*.ilk
+__pycache__/

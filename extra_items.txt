@@ -1,0 +1,23 @@
+//Server-side additions to the game's item_definitions.txt, read right after it.
+//Same commands, plus one the client never sees:
+//set_lock_size|item id|tiles|   area locks claim that many tiles, 0 locks the whole world
+//
+//IDs are the ones these items got in later Growtopia. Everything up to the highest ID ends up
+//in items.dat, so keep IDs low-ish.
+
+set_lock_size|60|200|
+
+add_tile|202|Small Lock|TILE_MATERIAL_LOCK|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SINGLE_FRAME_IN_TILESHEET|0|0|tiles_lock.rttex|0|0|TILE_COLLISION_SOLID|10|5|
+set_lock_size|202|10|
+
+add_tile|204|Big Lock|TILE_MATERIAL_LOCK|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SINGLE_FRAME_IN_TILESHEET|0|0|tiles_lock.rttex|0|0|TILE_COLLISION_SOLID|10|5|
+set_color|150|190|255|255|
+set_lock_size|204|48|
+
+add_tile|206|Huge Lock|TILE_MATERIAL_LOCK|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SINGLE_FRAME_IN_TILESHEET|0|0|tiles_lock.rttex|0|0|TILE_COLLISION_SOLID|10|5|
+set_color|255|160|80|255|
+set_lock_size|206|200|
+
+add_tile|242|World Lock|TILE_MATERIAL_LOCK|TILE_VISUAL_EFFECT_NONE|TILE_STORAGE_SINGLE_FRAME_IN_TILESHEET|0|0|tiles_lock.rttex|0|0|TILE_COLLISION_SOLID|10|5|
+set_color|255|225|120|255|
+set_lock_size|242|0|
