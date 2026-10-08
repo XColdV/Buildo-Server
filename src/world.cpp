@@ -233,7 +233,9 @@ bool LoadWorld(const std::string& dir, World& w) {
 void SerializeTile(Writer& out, const Tile& t) {
     const ItemDef* fg = GetItem(t.fg);
     uint8_t extra = fg ? ExtraTypeFor(fg->material) : 0;
-    const uint16_t flags = (extra ? 1 : 0) | (t.lockParent ? 2 : 0);
+    // 0x10 on a tree makes the client scale it by growth (0x4449b3); without
+    // it every sapling is drawn full size.
+    const uint16_t flags = (extra ? 1 : 0) | (t.lockParent ? 2 : 0) | (extra == EXTRA_TREE ? 0x10 : 0);
     out.u16(t.fg);
     out.u16(t.bg);
     out.u16(t.lockParent);

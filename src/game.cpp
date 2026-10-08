@@ -556,6 +556,7 @@ void Place(Player& p, World& w, int x, int y, uint16_t item) {
     c.intData = item;
     c.tileX = x;
     c.tileY = y;
+    if (IsSeedItem(*def)) c.pad3 = t.fruit;  // the client's fruit count for the new tree (0x43f30b)
     SendWorldTank(&w, c);
     if (def->maxCanHold != 0) p.Remove(item, 1);
 
@@ -569,8 +570,6 @@ void Place(Player& p, World& w, int x, int y, uint16_t item) {
             Console(p, "`5Area locked: `w" + std::to_string(n) + "`` tiles. Wrench the lock to share it.``");
         }
     }
-    // Planted trees: send the real fruit count instead of the client's default 3.
-    if (IsSeedItem(*def)) SendTileUpdate(w, x, y);
 }
 
 void LockDialog(Player& p, World& w, int x, int y) {
